@@ -8,6 +8,37 @@
 
 MODULE_LICENSE("GPL");
 
+struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64_t inode_no)
+{
+    struct assoofs_inode_info *inode_info = NULL;
+    struct buffer_head *bh;
+
+    struct assoofs_super_block_info *afs_sb = sb->s_fs_info;
+    struct assoofs_inode_info *buffer = NULL;
+
+    int i;
+
+    // Acceder a disco para leer el bloque con el almacén de inodos
+    bh = sb_bread(sb, ASSOOFS_INODESTORE_BLOCK_NUMBER);
+    inode_info = (struct assoofs_inode_info *)bh->b_data;
+
+    // Recorrer almacén de inodos en busca del nodo inode_no:
+
+    for (i = 0; i < afs_sb->inodes_count; i++)
+    {
+        if (inode_info->inode_no == inode_no)
+        {
+            buffer = kmalloc(sizeof(struct assoofs_inode_info), GFP_KERNEL);
+            memcpy(buffer, inode_info, sizeof(*buffer));
+            break;
+        }
+        inode_info++;
+    }
+
+    brelse(bh);
+    return buffer;
+}
+
 /*
  *  Operaciones sobre ficheros
  */
@@ -87,11 +118,42 @@ static const struct super_operations assoofs_sops = {
  */
 int assoofs_fill_super(struct super_block *sb, void *data, int silent)
 {
+    // Declaraciones juntas para cumplir con ISO C90
+    struct buffer_head *bh;
+    struct assoofs_super_block_info *assoofs_sb;
+
+    struct inode *root_inode;
     printk(KERN_INFO "assoofs_fill_super request\n");
     // 1.- Leer la información persistente del superbloque del dispositivo de bloques
+
+    bh = sb_bread(sb, ASSOOFS_SUPERBLOCK_BLOCK_NUMBER);
+    assoofs_sb = (struct assoofs_super_block_info *)bh->b_data;
+    brelse(bh); // Liberar la memoria
     // 2.- Comprobar los parámetros del superbloque
+    if (assoofs_sb->magic != ASSOOFS_MAGIC || assoofs_sb->block_size != ASSOOFS_DEFAULT_BLOCK_SIZE)
+    {
+        printk("Error with superblock parameters\n"); // TODO: completar esto
+        return -1;
+    }
     // 3.- Escribir la información persistente leída del dispositivo de bloques en el superbloque sb, incluído el campo s_op con las operaciones que soporta.
+    sb->s_magic = ASSOOFS_MAGIC;
+    sb->s_maxbytes = ASSOOFS_DEFAULT_BLOCK_SIZE;
+    sb->s_op = &assoofs_sops;
+    sb->s_fs_info = bh;
     // 4.- Crear el inodo raíz y asignarle operaciones sobre inodos (i_op) y sobre directorios (i_fop)
+
+    root_inode = new_inode(sb);                                 // Inicializar una variable inode
+    inode_init_owner(sb->s_user_ns, root_inode, NULL, S_IFDIR); // SIFDIR para directorios, SIFREG para ficheros
+
+    root_inode->i_ino = ASSOOFS_ROOTDIR_INODE_NUMBER;                                           // Número de inodo
+    root_inode->i_sb = sb;                                                                      // Puntero al superbloque
+    root_inode->i_op = &assoofs_inode_ops;                                                      // Dirección de una variable de tipo struct inode_operations previamente declarada
+    root_inode->i_fop = &assoofs_dir_operations;                                                // Dirección de una variable de tipo struct flie_operations previamente declarada. En la práctica tenemos 2: assoofs_dir_operations y assoofs_file_operations. La primera la utilizaremos cuando creemos inodos para directorios (como el directorio ra´ız) y la segunda cuando creemos inodos para ficheros.
+    root_inode->i_atime = root_inode->i_mtime = root_inode->i_ctime = current_time(root_inode); // Fechas
+    root_inode->i_private = assoofs_get_inode_info(sb, ASSOOFS_ROOTDIR_INODE_NUMBER);           // Información persistente del inodo
+
+    sb->s_root = d_make_root(root_inode);
+
     return 0;
 }
 
