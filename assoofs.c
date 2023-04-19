@@ -88,15 +88,92 @@ static struct inode_operations assoofs_inode_ops = {
     .mkdir = assoofs_mkdir,
 };
 
+static struct inode *assoofs_get_inode(struct super_block *sb, int ino)
+{
+    struct assoofs_inode_info *info = assoofs_get_inode_info(sb, ino);
+    struct inode *new = new_inode(sb);
+    new->i_ino = ino;
+    new->i_sb = sb;
+    new->i_op = &assoofs_inode_ops;
+
+    // Para i_fop tenemos que sabe si es un fichero o directorio:
+    if (S_ISDIR(info->mode))
+    {
+        new->i_fop = &assoofs_dir_operations;
+    }
+    else if (S_ISREG(info->mode))
+    {
+        new->i_fop = &assoofs_file_operations;
+    }
+    else
+    {
+        printk(KERN_ERR "Unknown inode type. Neither a directory nor a file.\n");
+    }
+
+    // Para las fechas del inodo:
+    new->i_atime = new->i_mtime = new->i_ctime = current_time(new);
+    // Guardamos en i_private la información persistente
+    new->i_private = info;
+
+    return new;
+}
+
 struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_dentry, unsigned int flags)
 {
+    struct assoofs_inode_info *parent_info;
+    struct super_block *sb;
+    struct buffer_head *bh;
+    struct assoofs_dir_record_entry *record;
+    int i;
+
     printk(KERN_INFO "Lookup request\n");
+
+    // Acceder al bloque de disco con el contenido del directorio apuntado por parent_inode
+    parent_info = parent_inode->i_private;
+    sb = parent_inode->i_sb;
+    bh = sb_bread(sb, parent_info->data_block_number);
+
+    // Recorrer el contenido del directorio buscando la entrada cuyo nombre se corresponda con el que buscamos.
+    // Cuando se localiza la entrada, se contruye el inodo correspondiente.
+    record = (struct assoofs_dir_record_entry *)bh->b_data;
+    for (i = 0; i < parent_info->dir_children_count; i++)
+    {
+        if (!strcmp(record->filename, child_dentry->d_name.name))
+        {
+            struct inode *inode = assoofs_get_inode(sb, record->inode_no);
+            inode_init_owner(sb->s_user_ns, inode, parent_inode, ((struct assoofs_inode_info *)inode->i_private)->mode);
+            d_add(child_dentry, inode);
+            return NULL;
+        }
+        record++;
+    }
+
     return NULL;
 }
 
 static int assoofs_create(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode, bool excl)
 {
+    struct inode *inode;
+    struct super_block *sb;
+    uint64_t count;
+
     printk(KERN_INFO "New file request\n");
+
+    sb = dir->i_sb;                                                           // puntero al superbloque desde dir
+    count = ((struct assoofs_super_block_info *)sb->s_fs_info)->inodes_count; // número de inodos de la información persistente del superbloque
+    inode = new_inode(sb);
+    inode->i_sb = sb;
+    inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+    inode->i_op = &assoofs_inode_ops;
+    inode->i_ino = ++count; // Asignar nuevo número al inodo a parti de count
+    if (count > ASSOOFS_MAX_FILESYSTEM_OBJECTS_SUPPORTED)
+    {
+        // TODO
+    }
+    else
+    {
+        // TODO
+    }
     return 0;
 }
 
@@ -129,6 +206,7 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent)
     bh = sb_bread(sb, ASSOOFS_SUPERBLOCK_BLOCK_NUMBER);
     assoofs_sb = (struct assoofs_super_block_info *)bh->b_data;
     brelse(bh); // Liberar la memoria
+
     // 2.- Comprobar los parámetros del superbloque
     if (assoofs_sb->magic != ASSOOFS_MAGIC || assoofs_sb->block_size != ASSOOFS_DEFAULT_BLOCK_SIZE)
     {
@@ -139,7 +217,7 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent)
     sb->s_magic = ASSOOFS_MAGIC;
     sb->s_maxbytes = ASSOOFS_DEFAULT_BLOCK_SIZE;
     sb->s_op = &assoofs_sops;
-    sb->s_fs_info = bh;
+    sb->s_fs_info = bh; // TODO check this
     // 4.- Crear el inodo raíz y asignarle operaciones sobre inodos (i_op) y sobre directorios (i_fop)
 
     root_inode = new_inode(sb);                                 // Inicializar una variable inode
