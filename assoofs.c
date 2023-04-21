@@ -17,13 +17,13 @@ struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64
     struct assoofs_inode_info *buffer = NULL;
 
     int i;
-
+    printk(KERN_INFO "assoofs accessing disk for reading inode container\n");
     // Acceder a disco para leer el bloque con el almacén de inodos
     bh = sb_bread(sb, ASSOOFS_INODESTORE_BLOCK_NUMBER);
     inode_info = (struct assoofs_inode_info *)bh->b_data;
 
     // Recorrer almacén de inodos en busca del nodo inode_no:
-
+    printk(KERN_INFO "assoofs looking for inode\n");
     for (i = 0; i < afs_sb->inodes_count; i++)
     {
         if (inode_info->inode_no == inode_no)
@@ -96,6 +96,8 @@ static struct inode *assoofs_get_inode(struct super_block *sb, int ino)
     new->i_sb = sb;
     new->i_op = &assoofs_inode_ops;
 
+    printk(KERN_INFO "Getting inode.\n");
+
     // Para i_fop tenemos que sabe si es un fichero o directorio:
     if (S_ISDIR(info->mode))
     {
@@ -115,6 +117,8 @@ static struct inode *assoofs_get_inode(struct super_block *sb, int ino)
     // Guardamos en i_private la información persistente
     new->i_private = info;
 
+    printk(KERN_INFO "Got inode.\n");
+
     return new;
 }
 
@@ -130,14 +134,19 @@ struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_d
 
     // Acceder al bloque de disco con el contenido del directorio apuntado por parent_inode
     parent_info = parent_inode->i_private;
+    printk(KERN_INFO "Lookup request. Borrame 1\n");
     sb = parent_inode->i_sb;
+    printk(KERN_INFO "Lookup request. Borrame 2\n");
     bh = sb_bread(sb, parent_info->data_block_number);
+
+    printk(KERN_INFO "Lookup request. Borrame\n");
 
     // Recorrer el contenido del directorio buscando la entrada cuyo nombre se corresponda con el que buscamos.
     // Cuando se localiza la entrada, se contruye el inodo correspondiente.
     record = (struct assoofs_dir_record_entry *)bh->b_data;
     for (i = 0; i < parent_info->dir_children_count; i++)
     {
+        printk(KERN_INFO "Lookup request. Borrrame, i=%d\n", i);
         if (!strcmp(record->filename, child_dentry->d_name.name))
         {
             struct inode *inode = assoofs_get_inode(sb, record->inode_no);
@@ -147,6 +156,8 @@ struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_d
         }
         record++;
     }
+
+    printk(KERN_ERR "No inode found\n");
 
     return NULL;
 }
@@ -206,6 +217,7 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent)
     bh = sb_bread(sb, ASSOOFS_SUPERBLOCK_BLOCK_NUMBER);
     assoofs_sb = (struct assoofs_super_block_info *)bh->b_data;
     brelse(bh); // Liberar la memoria
+    printk(KERN_INFO "assoofs_fill_super request. Liberando memoria\n");
 
     // 2.- Comprobar los parámetros del superbloque
     if (assoofs_sb->magic != ASSOOFS_MAGIC || assoofs_sb->block_size != ASSOOFS_DEFAULT_BLOCK_SIZE)
@@ -213,12 +225,15 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent)
         printk("Error with superblock parameters\n"); // TODO: completar esto
         return -1;
     }
+
+    printk(KERN_INFO "assoofs_fill_super request. Escribiré en disco\n");
     // 3.- Escribir la información persistente leída del dispositivo de bloques en el superbloque sb, incluído el campo s_op con las operaciones que soporta.
     sb->s_magic = ASSOOFS_MAGIC;
     sb->s_maxbytes = ASSOOFS_DEFAULT_BLOCK_SIZE;
     sb->s_op = &assoofs_sops;
     sb->s_fs_info = bh; // TODO check this
     // 4.- Crear el inodo raíz y asignarle operaciones sobre inodos (i_op) y sobre directorios (i_fop)
+    printk(KERN_INFO "assoofs_fill_super request. Escribí en disco\n");
 
     root_inode = new_inode(sb);                                 // Inicializar una variable inode
     inode_init_owner(sb->s_user_ns, root_inode, NULL, S_IFDIR); // SIFDIR para directorios, SIFREG para ficheros
@@ -231,7 +246,7 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent)
     root_inode->i_private = assoofs_get_inode_info(sb, ASSOOFS_ROOTDIR_INODE_NUMBER);           // Información persistente del inodo
 
     sb->s_root = d_make_root(root_inode);
-
+    printk(KERN_INFO "assoofs_fill_super request. Creé e hice inodo raíz\n");
     return 0;
 }
 
