@@ -231,7 +231,7 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent)
     sb->s_magic = ASSOOFS_MAGIC;
     sb->s_maxbytes = ASSOOFS_DEFAULT_BLOCK_SIZE;
     sb->s_op = &assoofs_sops;
-    sb->s_fs_info = bh; // TODO check this
+    sb->s_fs_info = assoofs_sb;
     // 4.- Crear el inodo raíz y asignarle operaciones sobre inodos (i_op) y sobre directorios (i_fop)
     printk(KERN_INFO "assoofs_fill_super request. Escribí en disco\n");
 
