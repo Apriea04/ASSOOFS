@@ -25,7 +25,7 @@ void assoofs_save_sb_info(struct super_block *vsb)
  * @brief Gives a free block to the given inode and updates the superblock info
  *
  */
-void assoofs_sb_get_a_freeblock(struct super_block *sb, uint64_t *block)
+int assoofs_sb_get_a_freeblock(struct super_block *sb, uint64_t *block)
 {
     int i;
     // Información persistente del superbloque (campo s_fs_info)
@@ -48,7 +48,7 @@ void assoofs_sb_get_a_freeblock(struct super_block *sb, uint64_t *block)
     return 0; // Todo ha ido bien;
 }
 
-void assoofs_add_inode_info(struct super_block *sb, astruc assoofs_inode_info *inode)
+void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *inode)
 {
     // TODO
 }
@@ -56,16 +56,13 @@ void assoofs_add_inode_info(struct super_block *sb, astruc assoofs_inode_info *i
 int assoofs_save_inode_info(struct super_block *sb, struct assoofs_inode_info *inode_info)
 {
     // TODO
+    return 0;
 }
 
 struct assoofs_inode_info *assoofs_search_inode_info(struct super_block *sb, struct assoofs_inode_info *start, struct assoofs_inode_info *search)
 {
     // TODO
-}
-
-static int assoofs_mkdir(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode)
-{
-    // TODO
+    return NULL;
 }
 
 struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64_t inode_no)
@@ -232,6 +229,8 @@ static int assoofs_create(struct user_namespace *mnt_userns, struct inode *dir, 
     struct assoofs_inode_info *parent_inode_info;
     struct assoofs_dir_record_entry *dir_contents;
 
+    struct buffer_head *bh;
+
     printk(KERN_INFO "New file request\n");
 
     sb = dir->i_sb;                                                           // puntero al superbloque desde dir
@@ -277,7 +276,7 @@ static int assoofs_create(struct user_namespace *mnt_userns, struct inode *dir, 
     dir_contents += parent_inode_info->dir_children_count;
     dir_contents->inode_no = inode_info->inode_no; // inode_info es la información persistente creada antes
 
-    strcpy(dir_contens->filename, dentry->d_name.name);
+    strcpy(dir_contents->filename, dentry->d_name.name);
     mark_buffer_dirty(bh);
     sync_dirty_buffer(bh);
     brelse(bh);
