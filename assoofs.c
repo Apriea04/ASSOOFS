@@ -50,7 +50,29 @@ int assoofs_sb_get_a_freeblock(struct super_block *sb, uint64_t *block)
 
 void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *inode)
 {
-    // TODO
+    struct assoofs_super_block_info *assoofs_sb;
+    struct assoofs_inode_info *inode_info;
+    struct buffer_head *bh;
+
+    //Acceder a la información persistente del superbloque para obtener el contador de inodos:
+    assoofs_sb = sb->s_fs_info;
+
+    //Leer de disco el bloque que contiene el almacén de inodos:
+    bh = sb_bread(sb, ASSOOFS_INODESTORE_BLOCK_NUMBER);
+
+    //Obtener un puntero al final del almacén y escribir un nuevo valor al final
+    inode_info = (struct assoofs_inode_info *)bh->b_data;
+    inode_info += assoofs_sb->inodes_count;
+    memcpy(inode_info, inode, sizeof(struct assoofs_inode_info));
+
+    //Marcar el bloque como sucio y sincronizar
+    mark_buffer_dirty(bh);
+    sync_dirty_buffer(bh);
+
+    //Actualizar el contador de inodos de la información persistente del superbloque y guardar los cambios:
+    assoofs_sb ->inodes_count++;
+    assoofs_save_sb_info(sb);
+
 }
 
 int assoofs_save_inode_info(struct super_block *sb, struct assoofs_inode_info *inode_info)
@@ -214,7 +236,7 @@ struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_d
         record++;
     }
 
-    printk(KERN_ERR "No inode found\n");
+    printk(KERN_INFO "No inode found\n");
 
     return NULL;
 }
