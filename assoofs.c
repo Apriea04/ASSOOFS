@@ -289,8 +289,6 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
 
     struct buffer_head *bh;
 
-    printk(KERN_INFO "New file request\n");
-
     sb = dir->i_sb;                                                           // puntero al superbloque desde dir
     count = ((struct assoofs_super_block_info *)sb->s_fs_info)->inodes_count; // número de inodos de la información persistente del superbloque
     inode = new_inode(sb);
@@ -364,11 +362,13 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
 static int assoofs_create(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode, bool excl)
 {
     //"El último parámetro no lo utilizaremos"
+    printk(KERN_INFO "New file request\n");
     return assoofs_create_inode(true, mnt_userns, dir, dentry, mode);
 }
 
 static int assoofs_mkdir(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode)
 {
+    printk(KERN_INFO "New directory request\n");
     return assoofs_create_inode(false, mnt_userns, dir, dentry, mode);
 }
 
