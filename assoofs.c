@@ -242,19 +242,14 @@ struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_d
 
     // Acceder al bloque de disco con el contenido del directorio apuntado por parent_inode
     parent_info = parent_inode->i_private;
-    printk(KERN_INFO "Lookup request. Borrame 1\n");
     sb = parent_inode->i_sb;
-    printk(KERN_INFO "Lookup request. Borrame 2\n");
     bh = sb_bread(sb, parent_info->data_block_number);
-
-    printk(KERN_INFO "Lookup request. Borrame\n");
 
     // Recorrer el contenido del directorio buscando la entrada cuyo nombre se corresponda con el que buscamos.
     // Cuando se localiza la entrada, se contruye el inodo correspondiente.
     record = (struct assoofs_dir_record_entry *)bh->b_data;
     for (i = 0; i < parent_info->dir_children_count; i++)
     {
-        printk(KERN_INFO "Lookup request. Borrrame, i=%d\n", i);
         if (!strcmp(record->filename, child_dentry->d_name.name))
         {
             struct inode *inode = assoofs_get_inode(sb, record->inode_no);
