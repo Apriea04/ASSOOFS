@@ -169,14 +169,71 @@ const struct file_operations assoofs_file_operations = {
 
 ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
+    struct assoofs_inode_info *inode_info;
+    struct buffer_head *bh;
+    char *buffer;
+    int nbytes;
+    int bytesPorLeerError;
+
     printk(KERN_INFO "Read request\n");
-    return 0;
+
+    // Obtengo la información persistente del inodo con filp
+    inode_info = filp->f_path.dentry->d_inode->i_private;
+
+    // Compruebo el valor de ppos por si se alcanza el final del fichero
+    if (*ppos >= inode_info->file_size)
+    {
+        return 0;
+    }
+
+    // Accedo al contenido del fichero
+    bh = sb_bread(filp->f_path.dentry->d_inode->i_sb, inode_info->data_block_number);
+    buffer = (char *)bh->b_data;
+
+    // Con copy_to_user copio lo leído en el buffer
+    buffer += *ppos;                                                  // Incremento el buffer para que lea a partir de donde se quedó
+    nbytes = min((size_t)inode_info->file_size - (size_t)*ppos, len); // Se compara len con el tamaño del fichero menos los bytes leídos hasta el momento por si llegamos al final del fichero
+    // TODO ¿Esta línea para controlar el valor que devuelve está bien?
+    bytesPorLeerError = copy_to_user(buf, buffer, nbytes);
+    nbytes -= bytesPorLeerError;
+    *ppos += nbytes;
+    return nbytes;
 }
 
 ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos)
 {
+    char *buffer;
+    struct buffer_head *bh;
+    struct assoofs_inode_info *inode_info;
+    int bytesNoEscritos;
+    struct super_block *sb;
     printk(KERN_INFO "Write request\n");
-    return 0;
+
+    // Compruebo que la escritura entre en el archivo (que no sea superior al tamaño máx de bloque)
+    if (*ppos + len >= ASSOOFS_DEFAULT_BLOCK_SIZE)
+    {
+        printk(KERN_ERR "No hay suficiente espacio en el disco para escribir.\n");
+        return -ENOSPC;
+    }
+
+    // Escribo en el fichero con copy_from_user:
+    buffer = (char *)bh->b_data;
+    buffer += *ppos;
+    bytesNoEscritos = copy_from_user(buffer, buf, len);
+    // TODO ¿Esta línea para controlar el valor que devuelve está bien?
+    len -= bytesNoEscritos;
+
+    // Incrementar el valor de ppos, marcar el bloque como sucio y sincronizar
+    *ppos += len;
+    mark_buffer_dirty(bh);
+    sync_dirty_buffer(bh);
+
+    // Actualizar la información persistente del inodo y devolver los bytes escritos
+    inode_info = filp->f_path.dentry->d_inode->i_private;
+    inode_info->file_size = *ppos;
+    sb = filp->f_path.dentry ->d_inode->i_sb;
+    assoofs_save_inode_info(sb, inode_info);
+    return len;
 }
 
 /*
@@ -190,7 +247,47 @@ const struct file_operations assoofs_dir_operations = {
 
 static int assoofs_iterate(struct file *filp, struct dir_context *ctx)
 {
+    struct inode *inode;
+    struct super_block *sb;
+    struct assoofs_inode_info *inode_info;
+    struct buffer_head *bh;
+    struct assoofs_dir_record_entry *record;
+    int i;
+
     printk(KERN_INFO "Iterate request\n");
+
+    // Accedo al inodo, a la información persistente del inodo y al superbloque correspondiente al argumento filp
+    inode = filp->f_path.dentry->d_inode;
+    sb = inode->i_sb;
+    inode_info = inode->i_private;
+
+    // Compruebo si el contexto del directorio está creado. Miro si cxt no es cero:
+    if (ctx->pos)
+    {
+        return 0;
+    }
+
+    // Compruebo que el inodo que obtuve antes es un directorio:
+    if (!S_ISDIR(inode_info->mode))
+    {
+        return -1;
+    }
+
+    // Accedo al bloque donde se encuentra almacenado el directorio
+    // y con la indormación que contiene inicializo el contexto ctx
+    bh = sb_bread(sb, inode_info->data_block_number);
+    record = (struct assoofs_dir_record_entry *)bh->b_data;
+
+    for (i = 0; i < inode_info->dir_children_count; i++)
+    {
+        // dir_emit nos permite añadir nuevas entradas al contexto. Cada vez que añadimos
+        // una etrada al contexto, debemos incrementar el valor de pos con el tamaño de la
+        // nueva entrada
+        dir_emit(ctx, record->filename, ASSOOFS_FILENAME_MAXLEN, record->inode_no, DT_UNKNOWN);
+        ctx->pos += sizeof(struct assoofs_dir_record_entry);
+        record++;
+    }
+    brelse(bh);
     return 0;
 }
 
