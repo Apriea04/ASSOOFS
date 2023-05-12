@@ -197,6 +197,7 @@ ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *pp
     bytesPorLeerError = copy_to_user(buf, buffer, nbytes);
     nbytes -= bytesPorLeerError;
     *ppos += nbytes;
+    printk(KERN_INFO "Lectura completada \n");
     return nbytes;
 }
 
@@ -216,6 +217,10 @@ ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, lof
         return -ENOSPC;
     }
 
+    // TODO sacado de github
+    inode_info = filp->f_path.dentry->d_inode->i_private;
+    bh = sb_bread(filp->f_path.dentry->d_inode->i_sb, inode_info->data_block_number);
+
     // Escribo en el fichero con copy_from_user:
     buffer = (char *)bh->b_data;
     buffer += *ppos;
@@ -229,9 +234,8 @@ ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, lof
     sync_dirty_buffer(bh);
 
     // Actualizar la información persistente del inodo y devolver los bytes escritos
-    inode_info = filp->f_path.dentry->d_inode->i_private;
     inode_info->file_size = *ppos;
-    sb = filp->f_path.dentry ->d_inode->i_sb;
+    sb = filp->f_path.dentry->d_inode->i_sb;
     assoofs_save_inode_info(sb, inode_info);
     return len;
 }
