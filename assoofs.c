@@ -8,6 +8,81 @@
 
 MODULE_LICENSE("GPL");
 
+// Prototipos
+
+/*
+ *  Operaciones sobre ficheros
+ */
+ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos);
+ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos);
+const struct file_operations assoofs_file_operations = {
+    .read = assoofs_read,
+    .write = assoofs_write,
+};
+
+/*
+ *  Operaciones sobre directorios
+ */
+static int assoofs_iterate(struct file *filp, struct dir_context *ctx);
+const struct file_operations assoofs_dir_operations = {
+    .owner = THIS_MODULE,
+    .iterate = assoofs_iterate,
+};
+
+/*
+ *  Operaciones sobre inodos
+ */
+static int assoofs_create(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
+struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_dentry, unsigned int flags);
+static int assoofs_mkdir(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode);
+static struct inode_operations assoofs_inode_ops = {
+    .create = assoofs_create,
+    .lookup = assoofs_lookup,
+    .mkdir = assoofs_mkdir,
+};
+
+/*
+ *  Operaciones sobre el superbloque
+ */
+static const struct super_operations assoofs_sops = {
+    .drop_inode = generic_delete_inode,
+};
+
+/*
+ *  assoofs file system type
+ */
+static struct file_system_type assoofs_type = {
+    .owner = THIS_MODULE,
+    .name = "assoofs",
+    .mount = assoofs_mount,
+    .kill_sb = kill_block_super,
+};
+
+/*
+ *  Montaje de dispositivos assoofs
+ */
+static struct dentry *assoofs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
+
+/*
+ *  Funciones auxiliares
+ */
+void assoofs_save_sb_info(struct super_block *vsb);
+void assoofs_sb_get_a_freeblock(struct super_block *sb, uint64_t *block);
+void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *inode);
+struct assoofs_inode_info *assoofs_search_inode_info(struct super_block *sb, struct assoofs_inode_inof *start, struct assoofs_inode_info *search);
+int assoofs_save_inode_info(struct super_block *sb, struct assoofs_inode_info *inode_info);
+struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64_t inode_no);
+static struct inode *assoofs_get_inode(struct super_block *sb, int ino);
+static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode);
+
+/*
+ *  Otras funciones
+ */
+int assoofs_fill_super(struct super_block *sb, void *data, int silent);
+static struct dentry *assoofs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
+static int __init assoofs_init(void);
+static void __exit assoofs_exit(void);
+
 void assoofs_save_sb_info(struct super_block *vsb)
 {
     struct buffer_head *bh;
@@ -163,16 +238,6 @@ struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64
     return buffer;
 }
 
-/*
- *  Operaciones sobre ficheros
- */
-ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos);
-ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos);
-const struct file_operations assoofs_file_operations = {
-    .read = assoofs_read,
-    .write = assoofs_write,
-};
-
 ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
     struct assoofs_inode_info *inode_info;
@@ -225,7 +290,7 @@ ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, lof
         return -ENOSPC;
     }
 
-    //Inicializo inode_info y bh como en assoofs_read
+    // Inicializo inode_info y bh como en assoofs_read
     inode_info = filp->f_path.dentry->d_inode->i_private;
     bh = sb_bread(filp->f_path.dentry->d_inode->i_sb, inode_info->data_block_number);
 
@@ -248,15 +313,6 @@ ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, lof
     assoofs_save_inode_info(sb, inode_info);
     return len;
 }
-
-/*
- *  Operaciones sobre directorios
- */
-static int assoofs_iterate(struct file *filp, struct dir_context *ctx);
-const struct file_operations assoofs_dir_operations = {
-    .owner = THIS_MODULE,
-    .iterate = assoofs_iterate,
-};
 
 static int assoofs_iterate(struct file *filp, struct dir_context *ctx)
 {
@@ -303,18 +359,6 @@ static int assoofs_iterate(struct file *filp, struct dir_context *ctx)
     brelse(bh);
     return 0;
 }
-
-/*
- *  Operaciones sobre inodos
- */
-static int assoofs_create(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
-struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_dentry, unsigned int flags);
-static int assoofs_mkdir(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode);
-static struct inode_operations assoofs_inode_ops = {
-    .create = assoofs_create,
-    .lookup = assoofs_lookup,
-    .mkdir = assoofs_mkdir,
-};
 
 static struct inode *assoofs_get_inode(struct super_block *sb, int ino)
 {
@@ -380,7 +424,7 @@ struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_d
 
     printk(KERN_INFO "No inode found with name {%s}\n", child_dentry->d_name.name);
 
-    //Liberar bh
+    // Liberar bh
     brelse(bh);
     return NULL;
 }
@@ -407,7 +451,7 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     inode->i_sb = sb;
     inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
     inode->i_op = &assoofs_inode_ops;
-    inode->i_ino = count+1; // Asignar nuevo número al inodo a partir de count
+    inode->i_ino = count + 1; // Asignar nuevo número al inodo a partir de count
 
     if (count > ASSOOFS_MAX_FILESYSTEM_OBJECTS_SUPPORTED)
     {
@@ -427,8 +471,8 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     if (isDir)
     {
         inode->i_fop = &assoofs_dir_operations;
-        inode_info->dir_children_count = 0; //Está en UNION con dir_children_count
-        inode_info->mode = S_IFDIR | mode; // El mode es un argumento;
+        inode_info->dir_children_count = 0; // Está en UNION con dir_children_count
+        inode_info->mode = S_IFDIR | mode;  // El mode es un argumento;
 
         // Propietarios y permisos
         inode_init_owner(sb->s_user_ns, inode, dir, inode_info->mode);
@@ -436,8 +480,8 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     else
     {
         inode->i_fop = &assoofs_file_operations;
-        inode_info->mode = mode; // El mode es un argumento;
-        inode_info->file_size = 0; //Está en UNION con dir_children_count
+        inode_info->mode = mode;   // El mode es un argumento;
+        inode_info->file_size = 0; // Está en UNION con dir_children_count
 
         // Propietarios y permisos
         inode_init_owner(sb->s_user_ns, inode, dir, mode);
@@ -537,7 +581,7 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent)
 
     sb->s_root = d_make_root(root_inode);
 
-    //Liberar bh
+    // Liberar bh
     brelse(bh);
     return 0;
 }
