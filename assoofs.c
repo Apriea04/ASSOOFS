@@ -225,7 +225,7 @@ ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *pp
 
     // Liberar bh
     brelse(bh);
-    printk(KERN_INFO "Lectura completada \n");
+    printk(KERN_INFO "Finished reading \n");
     return nbytes;
 }
 
