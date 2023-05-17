@@ -8,80 +8,17 @@
 
 MODULE_LICENSE("GPL");
 
-// Prototipos
-
-/*
- *  Operaciones sobre ficheros
- */
-ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos);
-ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos);
-const struct file_operations assoofs_file_operations = {
-    .read = assoofs_read,
-    .write = assoofs_write,
-};
-
-/*
- *  Operaciones sobre directorios
- */
-static int assoofs_iterate(struct file *filp, struct dir_context *ctx);
-const struct file_operations assoofs_dir_operations = {
-    .owner = THIS_MODULE,
-    .iterate = assoofs_iterate,
-};
-
-/*
- *  Operaciones sobre inodos
- */
-static int assoofs_create(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
-struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_dentry, unsigned int flags);
-static int assoofs_mkdir(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode);
-static struct inode_operations assoofs_inode_ops = {
-    .create = assoofs_create,
-    .lookup = assoofs_lookup,
-    .mkdir = assoofs_mkdir,
-};
-
-/*
- *  Operaciones sobre el superbloque
- */
-static const struct super_operations assoofs_sops = {
-    .drop_inode = generic_delete_inode,
-};
-
-/*
- *  assoofs file system type
- */
-static struct file_system_type assoofs_type = {
-    .owner = THIS_MODULE,
-    .name = "assoofs",
-    .mount = assoofs_mount,
-    .kill_sb = kill_block_super,
-};
-
-/*
- *  Montaje de dispositivos assoofs
- */
-static struct dentry *assoofs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
-
 /*
  *  Funciones auxiliares
  */
 void assoofs_save_sb_info(struct super_block *vsb);
-void assoofs_sb_get_a_freeblock(struct super_block *sb, uint64_t *block);
+int assoofs_sb_get_a_freeblock(struct super_block *sb, uint64_t *block);
 void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *inode);
-struct assoofs_inode_info *assoofs_search_inode_info(struct super_block *sb, struct assoofs_inode_inof *start, struct assoofs_inode_info *search);
+struct assoofs_inode_info *assoofs_search_inode_info(struct super_block *sb, struct assoofs_inode_info *start, struct assoofs_inode_info *search);
 int assoofs_save_inode_info(struct super_block *sb, struct assoofs_inode_info *inode_info);
 struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64_t inode_no);
 static struct inode *assoofs_get_inode(struct super_block *sb, int ino);
 static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode);
-
-/*
- *  Otras funciones
- */
-int assoofs_fill_super(struct super_block *sb, void *data, int silent);
-static struct dentry *assoofs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
-static int __init assoofs_init(void);
-static void __exit assoofs_exit(void);
 
 void assoofs_save_sb_info(struct super_block *vsb)
 {
@@ -238,6 +175,16 @@ struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64
     return buffer;
 }
 
+/*
+ *  Operaciones sobre ficheros
+ */
+ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos);
+ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos);
+const struct file_operations assoofs_file_operations = {
+    .read = assoofs_read,
+    .write = assoofs_write,
+};
+
 ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
     struct assoofs_inode_info *inode_info;
@@ -314,6 +261,15 @@ ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, lof
     return len;
 }
 
+/*
+ *  Operaciones sobre directorios
+ */
+static int assoofs_iterate(struct file *filp, struct dir_context *ctx);
+const struct file_operations assoofs_dir_operations = {
+    .owner = THIS_MODULE,
+    .iterate = assoofs_iterate,
+};
+
 static int assoofs_iterate(struct file *filp, struct dir_context *ctx)
 {
     struct inode *inode;
@@ -359,6 +315,18 @@ static int assoofs_iterate(struct file *filp, struct dir_context *ctx)
     brelse(bh);
     return 0;
 }
+
+/*
+ *  Operaciones sobre inodos
+ */
+static int assoofs_create(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
+struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_dentry, unsigned int flags);
+static int assoofs_mkdir(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode);
+static struct inode_operations assoofs_inode_ops = {
+    .create = assoofs_create,
+    .lookup = assoofs_lookup,
+    .mkdir = assoofs_mkdir,
+};
 
 static struct inode *assoofs_get_inode(struct super_block *sb, int ino)
 {
