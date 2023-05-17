@@ -201,7 +201,6 @@ ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *pp
     nbytes = min((size_t)inode_info->file_size - (size_t)*ppos, len); // Se compara len con el tamaño del fichero menos los bytes leídos hasta el momento por si llegamos al final del fichero
     // TODO ¿Esta línea para controlar el valor que devuelve está bien?
     bytesPorLeerError = copy_to_user(buf, buffer, nbytes);
-    nbytes -= bytesPorLeerError;
     *ppos += nbytes;
 
     // Liberar bh
@@ -226,7 +225,7 @@ ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, lof
         return -ENOSPC;
     }
 
-    // TODO sacado de github
+    //Inicializo inode_info y bh como en assoofs_read
     inode_info = filp->f_path.dentry->d_inode->i_private;
     bh = sb_bread(filp->f_path.dentry->d_inode->i_sb, inode_info->data_block_number);
 
@@ -234,8 +233,6 @@ ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, lof
     buffer = (char *)bh->b_data;
     buffer += *ppos;
     bytesNoEscritos = copy_from_user(buffer, buf, len);
-    // TODO ¿Esta línea para controlar el valor que devuelve está bien?
-    len -= bytesNoEscritos;
 
     // Incrementar el valor de ppos, marcar el bloque como sucio y sincronizar
     *ppos += len;
@@ -472,8 +469,6 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     parent_inode_info->dir_children_count++;
     assoofs_save_inode_info(sb, parent_inode_info);
 
-    //Liberar bh
-    brelse(bh);
     return 0;
 }
 
@@ -517,7 +512,7 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent)
     // 2.- Comprobar los parámetros del superbloque
     if (assoofs_sb->magic != ASSOOFS_MAGIC || assoofs_sb->block_size != ASSOOFS_DEFAULT_BLOCK_SIZE)
     {
-        printk("Error with superblock parameters\n"); // TODO: completar esto
+        printk(KERN_ERR "Error with superblock parameters\n"); // TODO: completar esto
         return -1;
     }
 
