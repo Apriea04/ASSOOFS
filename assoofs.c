@@ -79,6 +79,9 @@ void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *i
     mark_buffer_dirty(bh);
     sync_dirty_buffer(bh);
 
+    // Liberar bh
+    brelse(bh);
+
     // Actualizar el contador de inodos de la información persistente del superbloque y guardar los cambios:
     assoofs_sb->inodes_count++;
     assoofs_save_sb_info(sb);
@@ -124,6 +127,9 @@ int assoofs_save_inode_info(struct super_block *sb, struct assoofs_inode_info *i
     memcpy(inode_pos, inode_info, sizeof(*inode_pos));
     mark_buffer_dirty(bh);
     sync_dirty_buffer(bh);
+
+    // Liberar bh
+    brelse(bh);
     return 0;
 }
 
@@ -197,6 +203,9 @@ ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *pp
     bytesPorLeerError = copy_to_user(buf, buffer, nbytes);
     nbytes -= bytesPorLeerError;
     *ppos += nbytes;
+
+    // Liberar bh
+    brelse(bh);
     printk(KERN_INFO "Lectura completada \n");
     return nbytes;
 }
@@ -232,6 +241,9 @@ ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, lof
     *ppos += len;
     mark_buffer_dirty(bh);
     sync_dirty_buffer(bh);
+
+    // Liberar bh
+    brelse(bh);
 
     // Actualizar la información persistente del inodo y devolver los bytes escritos
     inode_info->file_size = *ppos;
@@ -371,6 +383,8 @@ struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_d
 
     printk(KERN_INFO "No inode found with name {%s}\n", child_dentry->d_name.name);
 
+    //Liberar bh
+    brelse(bh);
     return NULL;
 }
 
@@ -409,13 +423,12 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     inode_info = kmalloc(sizeof(struct assoofs_inode_info), GFP_KERNEL);
     inode_info->inode_no = inode->i_ino;
 
-    inode_info->file_size = 0;
     inode->i_private = inode_info;
 
     if (isDir)
     {
         inode->i_fop = &assoofs_dir_operations;
-        inode_info->dir_children_count = 0;
+        inode_info->dir_children_count = 0; //Está en UNION con dir_children_count
         inode_info->mode = S_IFDIR | mode; // El mode es un argumento;
 
         // Propietarios y permisos
@@ -425,6 +438,7 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     {
         inode->i_fop = &assoofs_file_operations;
         inode_info->mode = mode; // El mode es un argumento;
+        inode_info->file_size = 0; //Está en UNION con dir_children_count
 
         // Propietarios y permisos
         inode_init_owner(sb->s_user_ns, inode, dir, mode);
@@ -457,6 +471,9 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
 
     parent_inode_info->dir_children_count++;
     assoofs_save_inode_info(sb, parent_inode_info);
+
+    //Liberar bh
+    brelse(bh);
     return 0;
 }
 
@@ -522,6 +539,9 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent)
     root_inode->i_private = assoofs_get_inode_info(sb, ASSOOFS_ROOTDIR_INODE_NUMBER);           // Información persistente del inodo
 
     sb->s_root = d_make_root(root_inode);
+
+    //Liberar bh
+    brelse(bh);
     return 0;
 }
 
