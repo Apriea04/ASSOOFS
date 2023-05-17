@@ -1,0 +1,10 @@
+# Ignora todo
+*
+
+#Excepto los archivos a entregar y este
+!.gitignore
+!assoofs.c
+!assoofs.h
+!Makefile
+!mkassoofs.c
+!README.md
