@@ -407,10 +407,12 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     inode->i_sb = sb;
     inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
     inode->i_op = &assoofs_inode_ops;
-    inode->i_ino = ++count; // Asignar nuevo número al inodo a partir de count
+    inode->i_ino = count+1; // Asignar nuevo número al inodo a partir de count
+
     if (count > ASSOOFS_MAX_FILESYSTEM_OBJECTS_SUPPORTED)
     {
         printk(KERN_ERR "Max filesystem objects created\n");
+        return -ENOSPC;
     }
     else
     {
@@ -476,13 +478,13 @@ static int assoofs_create(struct user_namespace *mnt_userns, struct inode *dir, 
 {
     //"El último parámetro no lo utilizaremos"
     printk(KERN_INFO "New file request\n");
-    return assoofs_create_inode(true, mnt_userns, dir, dentry, mode);
+    return assoofs_create_inode(false, mnt_userns, dir, dentry, mode);
 }
 
 static int assoofs_mkdir(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode)
 {
     printk(KERN_INFO "New directory request\n");
-    return assoofs_create_inode(false, mnt_userns, dir, dentry, mode);
+    return assoofs_create_inode(true, mnt_userns, dir, dentry, mode);
 }
 
 /*
