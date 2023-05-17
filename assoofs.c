@@ -8,6 +8,9 @@
 
 MODULE_LICENSE("GPL");
 
+// Variables globales
+static struct kmem_cache *assoofs_inode_cache;
+
 /*
  *  Funciones auxiliares
  */
@@ -19,6 +22,11 @@ int assoofs_save_inode_info(struct super_block *sb, struct assoofs_inode_info *i
 struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64_t inode_no);
 static struct inode *assoofs_get_inode(struct super_block *sb, int ino);
 static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode);
+
+/*
+ *  Apartados extra (parte opcional)
+ */
+int assoofs_destroy_inode(struct inode *inode);
 
 void assoofs_save_sb_info(struct super_block *vsb)
 {
@@ -286,7 +294,7 @@ static int assoofs_iterate(struct file *filp, struct dir_context *ctx)
     sb = inode->i_sb;
     inode_info = inode->i_private;
 
-    // Compruebo si el contexto del directorio está creado. Miro si cxt no es cero:
+    // Compruebo si el contexto del directorio está creado. Miro si ctx no es cero:
     if (ctx->pos)
     {
         return 0;
@@ -431,7 +439,12 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
         printk(KERN_INFO "Filesystem objects less/equal than maximum\n");
     }
 
-    inode_info = kmalloc(sizeof(struct assoofs_inode_info), GFP_KERNEL);
+    // Código normal
+    // inode_info = kmalloc(sizeof(struct assoofs_inode_info), GFP_KERNEL);
+    // Para la caché de inodos:
+    inode_info = kmem_cache_alloc(assoofs_inode_cache, GFP_KERNEL);
+    printk(KERN_INFO "Cache space reserved\n");
+
     inode_info->inode_no = inode->i_ino;
 
     inode->i_private = inode_info;
@@ -549,8 +562,6 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent)
 
     sb->s_root = d_make_root(root_inode);
 
-    // Liberar bh
-    brelse(bh);
     return 0;
 }
 
@@ -579,19 +590,40 @@ static struct file_system_type assoofs_type = {
 static int __init assoofs_init(void)
 {
     int ret;
+    assoofs_inode_cache = kmem_cache_create("assoofs_inode_cache", sizeof(struct assoofs_inode_info), 0, (SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD), NULL);
     printk(KERN_INFO "assoofs_init request\n");
     ret = register_filesystem(&assoofs_type);
     // Control de errores a partir del valor de ret
     return ret;
 }
 
+// TODO apartado C operaciones del sueprbloque
+
 static void __exit assoofs_exit(void)
 {
     int ret;
     printk(KERN_INFO "assoofs_exit request\n");
     ret = unregister_filesystem(&assoofs_type);
+    kmem_cache_destroy(assoofs_inode_cache);
     // Control de errores a partir del valor de ret
 }
 
 module_init(assoofs_init);
 module_exit(assoofs_exit);
+
+/**
+ * Implementación de partes opcionales
+ */
+
+/**
+ * @brief Elimina inodos (también de la caché)
+ * 
+ * @param inode inodo a ser eliminado
+ */
+int assoofs_destroy_inode(struct inode *inode)
+{
+    struct assoofs_inode *inode_info = inode->i_private;
+    printk(KERN_INFO "Freeing private data of inode %p (%lu)\n", inode_info, inode->i_ino);
+    kmem_cache_free(assoofs_inode_cache, inode_info);
+    return 0; //TODO ask if valid
+}
