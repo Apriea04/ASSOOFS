@@ -10,6 +10,8 @@ MODULE_LICENSE("GPL");
 
 // Variables globales
 static struct kmem_cache *assoofs_inode_cache;
+static DEFINE_MUTEX(assoofs_sb_lock); // Mutex para el superbloque
+static DEFINE_MUTEX(assoofs_in_lock); // Mutex para el almacén de inodos
 
 /*
  *  Funciones auxiliares
@@ -204,6 +206,7 @@ ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *pp
     printk(KERN_INFO "Read request\n");
 
     // Obtengo la información persistente del inodo con filp
+    // mutex_lock_interruptible(&assoofs_in_lock);
     inode_info = filp->f_path.dentry->d_inode->i_private;
 
     // Compruebo el valor de ppos por si se alcanza el final del fichero
@@ -219,7 +222,7 @@ ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *pp
     // Con copy_to_user copio lo leído en el buffer
     buffer += *ppos;                                                  // Incremento el buffer para que lea a partir de donde se quedó
     nbytes = min((size_t)inode_info->file_size - (size_t)*ppos, len); // Se compara len con el tamaño del fichero menos los bytes leídos hasta el momento por si llegamos al final del fichero
-    // TODO ¿Esta línea para controlar el valor que devuelve está bien?
+    // mutex_unlock(&assoofs_in_lock);                                   // Libero el mutex cuando ya no necesito acceder al almacén de inodos
     bytesPorLeerError = copy_to_user(buf, buffer, nbytes);
     *ppos += nbytes;
 
@@ -246,6 +249,8 @@ ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, lof
     }
 
     // Inicializo inode_info y bh como en assoofs_read
+    // Para ello necesito el mutex de inodos
+    // mutex_lock_interruptible(&assoofs_in_lock);
     inode_info = filp->f_path.dentry->d_inode->i_private;
     bh = sb_bread(filp->f_path.dentry->d_inode->i_sb, inode_info->data_block_number);
 
@@ -264,8 +269,16 @@ ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, lof
 
     // Actualizar la información persistente del inodo y devolver los bytes escritos
     inode_info->file_size = *ppos;
+    // mutex_lock_interruptible(&assoofs_sb_lock); // Para acceder al superbloque necesito el mutex
     sb = filp->f_path.dentry->d_inode->i_sb;
+    if (mutex_lock_interruptible(&assoofs_in_lock))
+    {
+        printk(KERN_ERR "Signal arrived while waiting for inodes mutex\n");
+        return -EINTR;
+    }
     assoofs_save_inode_info(sb, inode_info);
+    // mutex_unlock(&assoofs_sb_lock);
+    mutex_unlock(&assoofs_in_lock);
     return len;
 }
 
@@ -290,7 +303,10 @@ static int assoofs_iterate(struct file *filp, struct dir_context *ctx)
     printk(KERN_INFO "Iterate request\n");
 
     // Accedo al inodo, a la información persistente del inodo y al superbloque correspondiente al argumento filp
+    // Para ello necesito los mutex
+    // mutex_lock_interruptible(&assoofs_in_lock);
     inode = filp->f_path.dentry->d_inode;
+    // mutex_lock_interruptible(&assoofs_sb_lock);
     sb = inode->i_sb;
     inode_info = inode->i_private;
 
@@ -320,6 +336,11 @@ static int assoofs_iterate(struct file *filp, struct dir_context *ctx)
         ctx->pos += sizeof(struct assoofs_dir_record_entry);
         record++;
     }
+
+    // Libero los mutex
+    // mutex_unlock(&assoofs_sb_lock);
+    // mutex_unlock(&assoofs_in_lock);
+
     brelse(bh);
     return 0;
 }
@@ -378,6 +399,10 @@ struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_d
 
     printk(KERN_INFO "Lookup request\n");
 
+    // Nos hacemos con ambos mutex
+    // mutex_lock_interruptible(&assoofs_in_lock);
+    // mutex_lock_interruptible(&assoofs_sb_lock);
+
     // Acceder al bloque de disco con el contenido del directorio apuntado por parent_inode
     parent_info = parent_inode->i_private;
     sb = parent_inode->i_sb;
@@ -400,6 +425,10 @@ struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_d
 
     printk(KERN_INFO "No inode found with name {%s}\n", child_dentry->d_name.name);
 
+    // Liberamos los mutex
+    // mutex_unlock(&assoofs_in_lock);
+    // mutex_unlock(&assoofs_sb_lock);
+
     // Liberar bh
     brelse(bh);
     return NULL;
@@ -420,6 +449,9 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     struct assoofs_dir_record_entry *dir_contents;
 
     struct buffer_head *bh;
+
+    // Nos hacemos con el mutex del superbloque
+    // mutex_lock_interruptible(&assoofs_sb_lock);
 
     sb = dir->i_sb;                                                           // puntero al superbloque desde dir
     count = ((struct assoofs_super_block_info *)sb->s_fs_info)->inodes_count; // número de inodos de la información persistente del superbloque
@@ -468,6 +500,13 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
         inode_init_owner(sb->s_user_ns, inode, dir, mode);
     }
 
+    // Nos hacemos con el mutex de inodos
+    if (mutex_lock_interruptible(&assoofs_in_lock))
+    {
+        printk(KERN_ERR "Signal arrived while waiting for inodes mutex\n");
+        return -EINTR;
+    }
+
     d_add(dentry, inode);
 
     // Obtenemos un nuevo bloque para el inodo:
@@ -496,6 +535,10 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     parent_inode_info->dir_children_count++;
     assoofs_save_inode_info(sb, parent_inode_info);
 
+    // Liberamos los mutex
+    // mutex_unlock(&assoofs_sb_lock);
+    mutex_unlock(&assoofs_in_lock);
+
     return 0;
 }
 
@@ -516,7 +559,7 @@ static int assoofs_mkdir(struct user_namespace *mnt_userns, struct inode *dir, s
  *  Operaciones sobre el superbloque
  */
 static const struct super_operations assoofs_sops = {
-    .drop_inode = generic_delete_inode,
+    .drop_inode = assoofs_destroy_inode,
 };
 
 /*
@@ -531,7 +574,12 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent)
     struct inode *root_inode;
     printk(KERN_INFO "assoofs_fill_super request\n");
     // 1.- Leer la información persistente del superbloque del dispositivo de bloques
-
+    // Nos hacemos con el mutex del superbloque
+    if (mutex_lock_interruptible(&assoofs_sb_lock))
+    {
+        printk(KERN_ERR "Signal arrived while waiting for superblock mutex\n");
+        return -EINTR;
+    }
     bh = sb_bread(sb, ASSOOFS_SUPERBLOCK_BLOCK_NUMBER);
     assoofs_sb = (struct assoofs_super_block_info *)bh->b_data;
     brelse(bh); // Liberar la memoria
@@ -549,7 +597,12 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent)
     sb->s_op = &assoofs_sops;
     sb->s_fs_info = assoofs_sb;
     // 4.- Crear el inodo raíz y asignarle operaciones sobre inodos (i_op) y sobre directorios (i_fop)
-
+    // Nos hacemos con el mutex de inodos
+    if (mutex_lock_interruptible(&assoofs_in_lock))
+    {
+        printk(KERN_ERR "Signal arrived while waiting for inodes mutex\n");
+        return -EINTR;
+    }
     root_inode = new_inode(sb);                                 // Inicializar una variable inode
     inode_init_owner(sb->s_user_ns, root_inode, NULL, S_IFDIR); // SIFDIR para directorios, SIFREG para ficheros
 
@@ -562,6 +615,9 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent)
 
     sb->s_root = d_make_root(root_inode);
 
+    // Liberamos los mutex:
+    mutex_unlock(&assoofs_in_lock);
+    mutex_unlock(&assoofs_sb_lock);
     return 0;
 }
 
@@ -597,8 +653,6 @@ static int __init assoofs_init(void)
     return ret;
 }
 
-// TODO apartado C operaciones del sueprbloque
-
 static void __exit assoofs_exit(void)
 {
     int ret;
@@ -617,7 +671,7 @@ module_exit(assoofs_exit);
 
 /**
  * @brief Elimina inodos (también de la caché)
- * 
+ *
  * @param inode inodo a ser eliminado
  */
 int assoofs_destroy_inode(struct inode *inode)
@@ -625,5 +679,5 @@ int assoofs_destroy_inode(struct inode *inode)
     struct assoofs_inode *inode_info = inode->i_private;
     printk(KERN_INFO "Freeing private data of inode %p (%lu)\n", inode_info, inode->i_ino);
     kmem_cache_free(assoofs_inode_cache, inode_info);
-    return 0; //TODO ask if valid
+    return 0; // TODO ask if valid
 }
