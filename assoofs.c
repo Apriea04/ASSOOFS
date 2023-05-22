@@ -31,6 +31,8 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
  *  Apartados extra (parte opcional)
  */
 int assoofs_destroy_inode(struct inode *inode);
+static int assoofs_remove(struct inode *dir, struct dentry *dentry);
+void assoofs_set_a_freeblock(struct assoofs_super_block_info *sb_info, uint64_t data_block_number);
 
 void assoofs_save_sb_info(struct super_block *vsb)
 {
@@ -164,7 +166,7 @@ int assoofs_save_inode_info(struct super_block *sb, struct assoofs_inode_info *i
 
     // Buscar los datos de inode_info en el almacén con una función auxiliar:
     // Extra: para ello necesitamos el mutex del superbloque
-    mutex_lock_interruptible(&assoofs_sb_lock); //TODO si el mutex no hace falta para leer, quizá esto haya que bajarlo una línea
+    mutex_lock_interruptible(&assoofs_sb_lock); // TODO si el mutex no hace falta para leer, quizá esto haya que bajarlo una línea
     inode_pos = assoofs_search_inode_info(sb, (struct assoofs_inode_info *)bh->b_data, inode_info);
 
     // Actualizar el inodo, marcar el bloque como sucio y sincronizar
@@ -172,7 +174,7 @@ int assoofs_save_inode_info(struct super_block *sb, struct assoofs_inode_info *i
     mark_buffer_dirty(bh);
     sync_dirty_buffer(bh);
 
-    //Extra: liberamos el mutex
+    // Extra: liberamos el mutex
     mutex_unlock(&assoofs_sb_lock);
 
     // Liberar bh
@@ -346,8 +348,17 @@ static int assoofs_iterate(struct file *filp, struct dir_context *ctx)
         // dir_emit nos permite añadir nuevas entradas al contexto. Cada vez que añadimos
         // una etrada al contexto, debemos incrementar el valor de pos con el tamaño de la
         // nueva entrada
-        dir_emit(ctx, record->filename, ASSOOFS_FILENAME_MAXLEN, record->inode_no, DT_UNKNOWN);
-        ctx->pos += sizeof(struct assoofs_dir_record_entry);
+        // Extra: con el borrado tenemos que comprobar que se esté usando
+        if (record->state_flag == ASSOOFS_FLAG_USED)
+        {
+            dir_emit(ctx, record->filename, ASSOOFS_FILENAME_MAXLEN, record->inode_no, DT_UNKNOWN);
+            ctx->pos += sizeof(struct assoofs_dir_record_entry);
+        }
+        else if (record->state_flag == ASSOOFS_FLAG_FREE)
+        {
+            i--; // Ese no era un hijo, ya que está borrado
+            printk(KERN_INFO "Iterate passed through a deleted file\n");
+        }
         record++;
     }
     brelse(bh);
@@ -364,6 +375,9 @@ static struct inode_operations assoofs_inode_ops = {
     .create = assoofs_create,
     .lookup = assoofs_lookup,
     .mkdir = assoofs_mkdir,
+    // Extra: el borrado
+    .unlink = assoofs_remove,
+    .rmdir = assoofs_remove,
 };
 
 static struct inode *assoofs_get_inode(struct super_block *sb, int ino)
@@ -398,6 +412,14 @@ static struct inode *assoofs_get_inode(struct super_block *sb, int ino)
     return new;
 }
 
+/**
+ * @brief Consulta los archivos de un directorio
+ *
+ * @param parent_inode
+ * @param child_dentry
+ * @param flags
+ * @return struct dentry*
+ */
 struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_dentry, unsigned int flags)
 {
     struct assoofs_inode_info *parent_info;
@@ -425,6 +447,13 @@ struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_d
             d_add(child_dentry, inode);
             return NULL;
         }
+
+        // Extra: para no contar hijos borrados
+        if (record->state_flag == ASSOOFS_FLAG_FREE)
+        {
+            printk(KERN_INFO "Lookup passed through a deleted file\n");
+            i--; // Ese no es hijo, porque no existe.
+        }
         record++;
     }
 
@@ -451,6 +480,8 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
 
     struct buffer_head *bh;
 
+    int i;
+
     sb = dir->i_sb; // puntero al superbloque desde dir
     // Extra: me hago con el mutex del sueprbloque para leer
     mutex_lock_interruptible(&assoofs_sb_lock);
@@ -461,6 +492,7 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
     inode->i_op = &assoofs_inode_ops;
     inode->i_ino = count + 1; // Asignar nuevo número al inodo a partir de count
+    // TODO: comprobar el i_ino para el remove
 
     if (count > ASSOOFS_MAX_FILESYSTEM_OBJECTS_SUPPORTED)
     {
@@ -479,8 +511,8 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     printk(KERN_INFO "Cache space reserved\n");
 
     inode_info->inode_no = inode->i_ino;
-
     inode->i_private = inode_info;
+    inode_info->state_flag = ASSOOFS_FLAG_USED; // Extra: el inodo está usándose
 
     if (isDir)
     {
@@ -515,10 +547,22 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     bh = sb_bread(sb, parent_inode_info->data_block_number);
 
     dir_contents = (struct assoofs_dir_record_entry *)bh->b_data;
-    dir_contents += parent_inode_info->dir_children_count;
+
+    // dir_contents += parent_inode_info->dir_children_count;
+    // Extra: para el remove, la línea anterior cambia por el siguiente bucle
+    for (i = 0; i < parent_inode_info->dir_children_count; i++)
+    {
+        if (dir_contents->state_flag == ASSOOFS_FLAG_FREE)
+        {
+            i--;
+        }
+        dir_contents++;
+    }
+
     dir_contents->inode_no = inode_info->inode_no; // inode_info es la información persistente creada antes
 
     strcpy(dir_contents->filename, dentry->d_name.name);
+    dir_contents->state_flag = ASSOOFS_FLAG_USED; // Extra: necesario para el remove
     mark_buffer_dirty(bh);
     sync_dirty_buffer(bh);
     brelse(bh);
@@ -665,4 +709,85 @@ int assoofs_destroy_inode(struct inode *inode)
     printk(KERN_INFO "Freeing private data of inode %p (%lu)\n", inode_info, inode->i_ino);
     kmem_cache_free(assoofs_inode_cache, inode_info);
     return 0; // TODO ask if valid
+}
+
+static int assoofs_remove(struct inode *dir, struct dentry *dentry)
+{
+    struct inode *inode;
+    struct assoofs_inode_info *parent_inode_info;
+    struct assoofs_inode_info *inode_info;
+    struct super_block *sb;
+    struct assoofs_super_block_info *sb_info;
+    struct buffer_head *bh;
+    int i;
+    struct assoofs_dir_record_entry *record;
+
+    printk(KERN_INFO "Remove inode request\n");
+
+    // Obtener el superbloque
+    sb = dentry->d_sb;
+    // Obtener el superblock info
+    sb_info = sb->s_fs_info;
+    // Obtener el inodo del directorio
+    inode = dentry->d_inode;
+    // Obtener el inode_info
+    inode_info = inode->i_private;
+    // Obtener el inode_info del padre
+    parent_inode_info = dir->i_private;
+
+    // Ponemos la flag como libre
+    inode_info->state_flag = ASSOOFS_FLAG_FREE;
+
+    // Ahora el padre tiene un hijo menos
+    parent_inode_info->dir_children_count--;
+
+    // Actualizamos la información del superbloque (padre e hijo)
+    // TODO he de usar los mutex aquí también?
+    assoofs_save_inode_info(sb, inode_info);
+    assoofs_save_inode_info(sb, parent_inode_info);
+
+    // TODO: Actualizamos el inode en la caché?
+    assoofs_set_a_freeblock(sb_info, inode_info->data_block_number);
+
+    // Ahora el superbloque debe contar con un inodo menos
+    sb_info->inodes_count--;
+
+    // Actualizamos superbloque
+    assoofs_save_sb_info(sb);
+
+    // Ahora eliminamos el dentry
+    d_drop(dentry);
+
+    bh = sb_bread(sb, parent_inode_info->data_block_number);
+
+    // Recorro los records del directorio
+    record = (struct assoofs_dir_record_entry *)bh->b_data;
+    for (i = 0; i < parent_inode_info->dir_children_count; i++)
+    {
+        if (!strcmp(record->filename, dentry->d_name.name) && record->inode_no == inode->i_ino)
+        {
+            printk(KERN_INFO "Found inode dir_record_entry to remove\n");
+            record->state_flag = ASSOOFS_FLAG_FREE;
+        }
+
+        if (record->state_flag == ASSOOFS_FLAG_FREE)
+        {
+            i--;
+        }
+        record++;
+    }
+
+    // Para sincronizar
+    mark_buffer_dirty(bh);
+    sync_dirty_buffer(bh);
+    brelse(bh);
+
+    return 0;
+}
+
+void assoofs_set_a_freeblock(struct assoofs_super_block_info *sb_info, uint64_t data_block_number)
+{
+    printk(KERN_INFO "Set a free block request\n");
+
+    sb_info->free_blocks |= (1 << data_block_number);
 }
