@@ -590,6 +590,8 @@ static struct file_system_type assoofs_type = {
 static int __init assoofs_init(void)
 {
     int ret;
+
+    //Incializo la caché de inodos
     assoofs_inode_cache = kmem_cache_create("assoofs_inode_cache", sizeof(struct assoofs_inode_info), 0, (SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD), NULL);
     printk(KERN_INFO "assoofs_init request\n");
     ret = register_filesystem(&assoofs_type);
@@ -604,6 +606,7 @@ static void __exit assoofs_exit(void)
     int ret;
     printk(KERN_INFO "assoofs_exit request\n");
     ret = unregister_filesystem(&assoofs_type);
+    //Libero la memoria de la caché al salir
     kmem_cache_destroy(assoofs_inode_cache);
     // Control de errores a partir del valor de ret
 }
@@ -626,4 +629,4 @@ int assoofs_destroy_inode(struct inode *inode)
     printk(KERN_INFO "Freeing private data of inode %p (%lu)\n", inode_info, inode->i_ino);
     kmem_cache_free(assoofs_inode_cache, inode_info);
     return 0; //TODO ask if valid
-}
+
