@@ -11,6 +11,10 @@ MODULE_LICENSE("GPL");
 // Variables globales
 static struct kmem_cache *assoofs_inode_cache;
 
+// Semáforos para recursos compartidos
+static DEFINE_MUTEX(assoofs_sb_lock);
+static DEFINE_MUTEX(assoofs_inodes_lock);
+
 /*
  *  Funciones auxiliares
  */
@@ -57,6 +61,11 @@ int assoofs_sb_get_a_freeblock(struct super_block *sb, uint64_t *block)
 
     printk(KERN_INFO "assoofs_sb_get_a_freeblock request\n");
 
+    // Extra: como vamos a utilizar el superbloque para buscar bloques libres,
+    // necesitamos el mutex del superbloque
+
+    mutex_lock_interruptible(&assoofs_sb_lock);
+
     assoofs_sb = sb->s_fs_info;
 
     // Recorremos en busca de un bloque libre:
@@ -73,11 +82,16 @@ int assoofs_sb_get_a_freeblock(struct super_block *sb, uint64_t *block)
     // Actualizamos free_blocks
     assoofs_sb->free_blocks &= ~(1 << i);
     assoofs_save_sb_info(sb);
+
+    // Liberamos el mutex
+    mutex_unlock(&assoofs_sb_lock);
+
     return 0; // Todo ha ido bien;
 }
 
 void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *inode)
 {
+    // TODO: comprobar los mutex de este método
     struct assoofs_super_block_info *assoofs_sb;
     struct assoofs_inode_info *inode_info;
     struct buffer_head *bh;
@@ -88,6 +102,8 @@ void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *i
     assoofs_sb = sb->s_fs_info;
 
     // Leer de disco el bloque que contiene el almacén de inodos:
+    // Extra: para ello necesitamos el mutex correspondiente:
+    mutex_lock_interruptible(&assoofs_inodes_lock);
     bh = sb_bread(sb, ASSOOFS_INODESTORE_BLOCK_NUMBER);
 
     // Obtener un puntero al final del almacén y escribir un nuevo valor al final
@@ -103,8 +119,14 @@ void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *i
     brelse(bh);
 
     // Actualizar el contador de inodos de la información persistente del superbloque y guardar los cambios:
+    // Extra para ello necesito el mutex del superbloque
+    mutex_lock_interruptible(&assoofs_sb_lock);
     assoofs_sb->inodes_count++;
     assoofs_save_sb_info(sb);
+
+    // Extra: libero ambos mutex
+    mutex_unlock(&assoofs_sb_lock);
+    mutex_unlock(&assoofs_inodes_lock);
 }
 
 struct assoofs_inode_info *assoofs_search_inode_info(struct super_block *sb, struct assoofs_inode_info *start, struct assoofs_inode_info *search)
@@ -137,16 +159,21 @@ int assoofs_save_inode_info(struct super_block *sb, struct assoofs_inode_info *i
 
     printk(KERN_INFO "assoofs_save_inode_info request\n");
 
-    // Obtener de disco el almacén de inodos
+    // Obtener de disco el almacén de inodos (leer)
     bh = sb_bread(sb, ASSOOFS_INODESTORE_BLOCK_NUMBER);
 
     // Buscar los datos de inode_info en el almacén con una función auxiliar:
+    // Extra: para ello necesitamos el mutex del superbloque
+    mutex_lock_interruptible(&assoofs_sb_lock); //TODO si el mutex no hace falta para leer, quizá esto haya que bajarlo una línea
     inode_pos = assoofs_search_inode_info(sb, (struct assoofs_inode_info *)bh->b_data, inode_info);
 
     // Actualizar el inodo, marcar el bloque como sucio y sincronizar
     memcpy(inode_pos, inode_info, sizeof(*inode_pos));
     mark_buffer_dirty(bh);
     sync_dirty_buffer(bh);
+
+    //Extra: liberamos el mutex
+    mutex_unlock(&assoofs_sb_lock);
 
     // Liberar bh
     brelse(bh);
@@ -263,9 +290,12 @@ ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, lof
     brelse(bh);
 
     // Actualizar la información persistente del inodo y devolver los bytes escritos
+    // Extra: para ello necesitamos el mutex del almaceń de inodos
+    mutex_lock_interruptible(&assoofs_inodes_lock);
     inode_info->file_size = *ppos;
     sb = filp->f_path.dentry->d_inode->i_sb;
     assoofs_save_inode_info(sb, inode_info);
+    mutex_unlock(&assoofs_inodes_lock);
     return len;
 }
 
@@ -421,8 +451,11 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
 
     struct buffer_head *bh;
 
-    sb = dir->i_sb;                                                           // puntero al superbloque desde dir
+    sb = dir->i_sb; // puntero al superbloque desde dir
+    // Extra: me hago con el mutex del sueprbloque para leer
+    mutex_lock_interruptible(&assoofs_sb_lock);
     count = ((struct assoofs_super_block_info *)sb->s_fs_info)->inodes_count; // número de inodos de la información persistente del superbloque
+    mutex_unlock(&assoofs_sb_lock);                                           // libero el mutex tras haber leído
     inode = new_inode(sb);
     inode->i_sb = sb;
     inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
@@ -492,9 +525,12 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
 
     // PASO 3: actualizar la información persistente del inodo padre:
     // ahora tiene un archivo más
+    // Extra: necesitamos el mutex del almacén de inodos para escribir.
 
+    mutex_lock_interruptible(&assoofs_inodes_lock);
     parent_inode_info->dir_children_count++;
     assoofs_save_inode_info(sb, parent_inode_info);
+    mutex_unlock(&assoofs_inodes_lock);
 
     return 0;
 }
@@ -591,7 +627,7 @@ static int __init assoofs_init(void)
 {
     int ret;
 
-    //Incializo la caché de inodos
+    // Incializo la caché de inodos
     assoofs_inode_cache = kmem_cache_create("assoofs_inode_cache", sizeof(struct assoofs_inode_info), 0, (SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD), NULL);
     printk(KERN_INFO "assoofs_init request\n");
     ret = register_filesystem(&assoofs_type);
@@ -606,7 +642,7 @@ static void __exit assoofs_exit(void)
     int ret;
     printk(KERN_INFO "assoofs_exit request\n");
     ret = unregister_filesystem(&assoofs_type);
-    //Libero la memoria de la caché al salir
+    // Libero la memoria de la caché al salir
     kmem_cache_destroy(assoofs_inode_cache);
     // Control de errores a partir del valor de ret
 }
@@ -620,7 +656,7 @@ module_exit(assoofs_exit);
 
 /**
  * @brief Elimina inodos (también de la caché)
- * 
+ *
  * @param inode inodo a ser eliminado
  */
 int assoofs_destroy_inode(struct inode *inode)
@@ -628,5 +664,5 @@ int assoofs_destroy_inode(struct inode *inode)
     struct assoofs_inode *inode_info = inode->i_private;
     printk(KERN_INFO "Freeing private data of inode %p (%lu)\n", inode_info, inode->i_ino);
     kmem_cache_free(assoofs_inode_cache, inode_info);
-    return 0; //TODO ask if valid
-
+    return 0; // TODO ask if valid
+}
