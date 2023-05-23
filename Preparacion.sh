@@ -3,8 +3,8 @@
 #Script para montar ASSOOFS
 
 umount mnt/
-rmdir mnt
 rmmod assoofs
+rmdir mnt
 
 make clean
 
