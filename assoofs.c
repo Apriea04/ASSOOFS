@@ -33,6 +33,7 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
 int assoofs_destroy_inode(struct inode *inode);
 static int assoofs_remove(struct inode *dir, struct dentry *dentry);
 void assoofs_set_a_freeblock(struct assoofs_super_block_info *sb_info, uint64_t data_block_number);
+static int assoofs_move_file(struct user_namespace *mnt_userns, struct inode *old_dir, struct dentry *old_dentry, struct inode *new_dir, struct dentry *new_dentry, unsigned int excl);
 
 void assoofs_save_sb_info(struct super_block *vsb)
 {
@@ -425,6 +426,8 @@ static struct inode_operations assoofs_inode_ops = {
     // Extra: el borrado
     .unlink = assoofs_remove,
     .rmdir = assoofs_remove,
+    // Extra: el move de ficheros
+    .rename = assoofs_move_file,
 };
 
 static struct inode *assoofs_get_inode(struct super_block *sb, int ino)
@@ -839,4 +842,27 @@ void assoofs_set_a_freeblock(struct assoofs_super_block_info *sb_info, uint64_t 
     printk(KERN_INFO "Set a free block request\n");
 
     sb_info->free_blocks |= (1 << data_block_number);
+}
+
+static int assoofs_move_file(struct user_namespace *mnt_userns, struct inode *old_dir, struct dentry *old_dentry, struct inode *new_dir, struct dentry *new_dentry, unsigned int excl)
+{
+    struct inode *inode;
+    struct assoofs_inode_info *inode_info;
+
+    printk(KERN_INFO "Move request\n");
+
+    inode = old_dentry->d_inode;
+    inode_info = inode->i_private;
+
+    // Solo para ficheros:
+    if (inode_info->mode == S_IFREG)
+    {
+        // Es un fichero
+        assoofs_remove(old_dir, old_dentry);
+        assoofs_create(mnt_userns, new_dir, new_dentry, S_IFREG, 0);
+    } else {
+        printk(KERN_ERR "Tryed to move a directory. Not implemented yet\n");
+        return -1;
+    }
+    return 0;
 }
