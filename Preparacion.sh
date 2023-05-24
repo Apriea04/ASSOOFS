@@ -4,7 +4,7 @@
 
 umount mnt/
 rmmod assoofs
-rmdir mnt
+rm -r mnt
 
 make clean
 

@@ -66,7 +66,12 @@ int assoofs_sb_get_a_freeblock(struct super_block *sb, uint64_t *block)
     // Extra: como vamos a utilizar el superbloque para buscar bloques libres,
     // necesitamos el mutex del superbloque
 
-    mutex_lock_interruptible(&assoofs_sb_lock);
+    if (mutex_lock_interruptible(&assoofs_sb_lock))
+    {
+        // Al mutex le llegó una señal
+        printk(KERN_ERR "Signal arrived while waiting to get the sb mutex\n");
+        return -EINTR; // EINTR es la valor de que llego una señal mientras la llamada estaba en proceso
+    }
 
     assoofs_sb = sb->s_fs_info;
 
@@ -105,7 +110,12 @@ void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *i
 
     // Leer de disco el bloque que contiene el almacén de inodos:
     // Extra: para ello necesitamos el mutex correspondiente:
-    mutex_lock_interruptible(&assoofs_inodes_lock);
+    if (mutex_lock_interruptible(&assoofs_inodes_lock))
+    {
+        // Al mutex le llegó una señal
+        printk(KERN_ERR "Signal arrived while waiting to get the inodes mutex\n");
+        return;
+    }
     bh = sb_bread(sb, ASSOOFS_INODESTORE_BLOCK_NUMBER);
 
     // Obtener un puntero al final del almacén y escribir un nuevo valor al final
@@ -122,7 +132,12 @@ void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *i
 
     // Actualizar el contador de inodos de la información persistente del superbloque y guardar los cambios:
     // Extra para ello necesito el mutex del superbloque
-    mutex_lock_interruptible(&assoofs_sb_lock);
+    if (mutex_lock_interruptible(&assoofs_sb_lock))
+    {
+        // Al mutex le llegó una señal
+        printk(KERN_ERR "Signal arrived while waiting to get the sb mutex\n");
+        return;
+    }
     assoofs_sb->inodes_count++;
     assoofs_save_sb_info(sb);
 
@@ -165,11 +180,17 @@ int assoofs_save_inode_info(struct super_block *sb, struct assoofs_inode_info *i
     bh = sb_bread(sb, ASSOOFS_INODESTORE_BLOCK_NUMBER);
 
     // Buscar los datos de inode_info en el almacén con una función auxiliar:
-    // Extra: para ello necesitamos el mutex del superbloque
-    mutex_lock_interruptible(&assoofs_sb_lock); // TODO si el mutex no hace falta para leer, quizá esto haya que bajarlo una línea
+
     inode_pos = assoofs_search_inode_info(sb, (struct assoofs_inode_info *)bh->b_data, inode_info);
 
     // Actualizar el inodo, marcar el bloque como sucio y sincronizar
+    // Extra: para ello necesitamos el mutex del superbloque
+    if (mutex_lock_interruptible(&assoofs_sb_lock))
+    {
+        // Al mutex le llegó una señal
+        printk(KERN_ERR "Signal arrived while waiting to get the sb mutex\n");
+        return -EINTR; // EINTR es la valor de que llego una señal mientras la llamada estaba en proceso
+    }
     memcpy(inode_pos, inode_info, sizeof(*inode_pos));
     mark_buffer_dirty(bh);
     sync_dirty_buffer(bh);
@@ -201,7 +222,9 @@ struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64
     {
         if (inode_info->inode_no == inode_no)
         {
-            buffer = kmalloc(sizeof(struct assoofs_inode_info), GFP_KERNEL);
+            // buffer = kmalloc(sizeof(struct assoofs_inode_info), GFP_KERNEL);
+            // Extra: con cache de inodos, esto cambia a lo siguiente:
+            buffer = kmem_cache_alloc(assoofs_inode_cache, GFP_KERNEL);
             memcpy(buffer, inode_info, sizeof(*buffer));
             break;
         }
@@ -250,6 +273,15 @@ ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *pp
     nbytes = min((size_t)inode_info->file_size - (size_t)*ppos, len); // Se compara len con el tamaño del fichero menos los bytes leídos hasta el momento por si llegamos al final del fichero
     // TODO ¿Esta línea para controlar el valor que devuelve está bien?
     bytesPorLeerError = copy_to_user(buf, buffer, nbytes);
+
+    if (bytesPorLeerError != 0)
+    {
+        printk(KERN_ERR "%d bytes couldn't be read\n", bytesPorLeerError);
+    }
+    else
+    {
+        printk(KERN_INFO "Bytes were read correctly\n");
+    }
     *ppos += nbytes;
 
     // Liberar bh
@@ -271,7 +303,7 @@ ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, lof
     if (*ppos + len >= ASSOOFS_DEFAULT_BLOCK_SIZE)
     {
         printk(KERN_ERR "No hay suficiente espacio en el disco para escribir.\n");
-        return -ENOSPC;
+        return -ENOSPC; // Return EOF en write()
     }
 
     // Inicializo inode_info y bh como en assoofs_read
@@ -283,6 +315,15 @@ ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, lof
     buffer += *ppos;
     bytesNoEscritos = copy_from_user(buffer, buf, len);
 
+    if (bytesNoEscritos != 0)
+    {
+        printk(KERN_ERR "%d bytes couldn't be written\n", bytesNoEscritos);
+    }
+    else
+    {
+        printk(KERN_INFO "Bytes were written correctly\n");
+    }
+
     // Incrementar el valor de ppos, marcar el bloque como sucio y sincronizar
     *ppos += len;
     mark_buffer_dirty(bh);
@@ -293,7 +334,12 @@ ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, lof
 
     // Actualizar la información persistente del inodo y devolver los bytes escritos
     // Extra: para ello necesitamos el mutex del almaceń de inodos
-    mutex_lock_interruptible(&assoofs_inodes_lock);
+    if (mutex_lock_interruptible(&assoofs_inodes_lock))
+    {
+        // Al mutex le llegó una señal
+        printk(KERN_ERR "Signal arrived while waiting to get the inodes mutex\n");
+        return -EINTR; // EINTR es la valor de que llego una señal mientras la llamada estaba en proceso
+    }
     inode_info->file_size = *ppos;
     sb = filp->f_path.dentry->d_inode->i_sb;
     assoofs_save_inode_info(sb, inode_info);
@@ -335,11 +381,12 @@ static int assoofs_iterate(struct file *filp, struct dir_context *ctx)
     // Compruebo que el inodo que obtuve antes es un directorio:
     if (!S_ISDIR(inode_info->mode))
     {
+        printk(KERN_INFO "Iterate request on non-directory\n");
         return -1;
     }
 
     // Accedo al bloque donde se encuentra almacenado el directorio
-    // y con la indormación que contiene inicializo el contexto ctx
+    // y con la información que contiene inicializo el contexto ctx
     bh = sb_bread(sb, inode_info->data_block_number);
     record = (struct assoofs_dir_record_entry *)bh->b_data;
 
@@ -482,11 +529,8 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
 
     int i;
 
-    sb = dir->i_sb; // puntero al superbloque desde dir
-    // Extra: me hago con el mutex del sueprbloque para leer
-    mutex_lock_interruptible(&assoofs_sb_lock);
+    sb = dir->i_sb;                                                           // puntero al superbloque desde dir
     count = ((struct assoofs_super_block_info *)sb->s_fs_info)->inodes_count; // número de inodos de la información persistente del superbloque
-    mutex_unlock(&assoofs_sb_lock);                                           // libero el mutex tras haber leído
     inode = new_inode(sb);
     inode->i_sb = sb;
     inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
@@ -541,7 +585,7 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     // Guardamos la información persistente
     assoofs_add_inode_info(sb, inode_info);
 
-    // PASO 2: modificar el contenido del directorio padre añadiendo una nueva entrada para elnuevo archivo:
+    // PASO 2: modificar el contenido del directorio padre añadiendo una nueva entrada para el nuevo archivo:
 
     parent_inode_info = dir->i_private;
     bh = sb_bread(sb, parent_inode_info->data_block_number);
@@ -571,7 +615,12 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     // ahora tiene un archivo más
     // Extra: necesitamos el mutex del almacén de inodos para escribir.
 
-    mutex_lock_interruptible(&assoofs_inodes_lock);
+    if (mutex_lock_interruptible(&assoofs_inodes_lock))
+    {
+        // Al mutex le llegó una señal
+        printk(KERN_ERR "Signal arrived while waiting to get the inodes mutex\n");
+        return -EINTR; // EINTR es la valor de que llego una señal mientras la llamada estaba en proceso
+    }
     parent_inode_info->dir_children_count++;
     assoofs_save_inode_info(sb, parent_inode_info);
     mutex_unlock(&assoofs_inodes_lock);
@@ -742,7 +791,7 @@ static int assoofs_remove(struct inode *dir, struct dentry *dentry)
     parent_inode_info->dir_children_count--;
 
     // Actualizamos la información del superbloque (padre e hijo)
-    // TODO he de usar los mutex aquí también?
+    // P: He de usar los mutex aquí también? R: No, mutex solo sobre parte básica
     assoofs_save_inode_info(sb, inode_info);
     assoofs_save_inode_info(sb, parent_inode_info);
 

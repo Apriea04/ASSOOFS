@@ -134,6 +134,7 @@ int main(int argc, char *argv[])
     struct assoofs_dir_record_entry record = {
         .filename = "README.txt",
         .inode_no = WELCOMEFILE_INODE_NUMBER,
+        .state_flag = ASSOOFS_FLAG_USED,
     };
 
     if (argc != 2)
