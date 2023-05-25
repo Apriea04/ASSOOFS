@@ -853,16 +853,21 @@ static int assoofs_move_file(struct user_namespace *mnt_userns, struct inode *ol
 
     inode = old_dentry->d_inode;
     inode_info = inode->i_private;
+    
+    //Utilizaré el método de borrar y crear el archivo
 
-    // Solo para ficheros:
+    // A la hora de borrar da igual si es fichero o directorio
+    assoofs_remove(old_dir, old_dentry);
+    
+    // Pero para crear, dependiendo de si es fichero o directorio llamaré a mkdir o assoofs_create:
+    
     if (inode_info->mode == S_IFREG)
     {
         // Es un fichero
-        assoofs_remove(old_dir, old_dentry);
         assoofs_create(mnt_userns, new_dir, new_dentry, S_IFREG, 0);
     } else {
-        printk(KERN_ERR "Tryed to move a directory. Not implemented yet\n");
-        return -1;
+    	// Es un directorio
+        assoofs_mkdir(mnt_userns, new_dir, new_dentry, S_IFDIR);
     }
     return 0;
 }
