@@ -1,7 +1,7 @@
 # ASSOOFS
 Implementación de la práctica final de Ampliación de Sistemas Operativos en el grado en Ingeniería Informática de la Universidad de León
 ## Partes realizadas
-He intentado hacer de la mejor manera lo siguiente:
+He intentado hacer lo mejor que he podido:
 - Parte obligatoria
 - Caché de inodos
 - Semáforos para ciertos recursos compartidos
@@ -10,4 +10,4 @@ He intentado hacer de la mejor manera lo siguiente:
 ## Autor
 Álvaro Prieto Álvarez (apriea04@estudiantes.unileon.es)
 ## Comentarios
-Repositorio en Github:
+Repositorio en GitHub: https://github.com/Apriea04/ASSOOFS
