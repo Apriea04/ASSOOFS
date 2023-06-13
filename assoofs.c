@@ -35,6 +35,11 @@ static int assoofs_remove(struct inode *dir, struct dentry *dentry);
 void assoofs_set_a_freeblock(struct assoofs_super_block_info *sb_info, uint64_t data_block_number);
 static int assoofs_move_file(struct user_namespace *mnt_userns, struct inode *old_dir, struct dentry *old_dentry, struct inode *new_dir, struct dentry *new_dentry, unsigned int excl);
 
+/**
+ * @brief Actualiza la información persistente del superbloque.
+ * Es conveniente llamar a esta función cuando se produzcan cambios en el superbloque
+ * 
+ */
 void assoofs_save_sb_info(struct super_block *vsb)
 {
     struct buffer_head *bh;
@@ -94,12 +99,17 @@ int assoofs_sb_get_a_freeblock(struct super_block *sb, uint64_t *block)
     // Liberamos el mutex
     mutex_unlock(&assoofs_sb_lock);
 
-    return 0; // Todo ha ido bien;
+    return 0; // Todo ha ido bien
 }
 
+/**
+ * @brief Guarda en disco la información persistente de un nuevo inodo (assoofs_inode_info) 
+ * 
+ * @param sb superbloque al que pertenece el inodo
+ * @param inode inodo a guardar
+ */
 void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *inode)
 {
-    // TODO: comprobar los mutex de este método
     struct assoofs_super_block_info *assoofs_sb;
     struct assoofs_inode_info *inode_info;
     struct buffer_head *bh;
@@ -147,6 +157,14 @@ void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *i
     mutex_unlock(&assoofs_inodes_lock);
 }
 
+/**
+ * @brief Obtiene un puntero a la información persistente (disco) de un inodo concreto (assoofs_inode_info)
+ * 
+ * @param sb superbloque al que pertenece el inodo
+ * @param start inodo donde comenzar la búsqueda
+ * @param search inodo buscado
+ * @return struct assoofs_inode_info* inodo buscado, NULL si no se encuentra
+ */
 struct assoofs_inode_info *assoofs_search_inode_info(struct super_block *sb, struct assoofs_inode_info *start, struct assoofs_inode_info *search)
 {
     uint64_t count = 0;
@@ -170,6 +188,13 @@ struct assoofs_inode_info *assoofs_search_inode_info(struct super_block *sb, str
     }
 }
 
+/**
+ * @brief Actualiza la información persistente (disco) de un inodo (ya creado)
+ * 
+ * @param sb superbloque al que pertenece el inodo
+ * @param inode_info información persistente a guardar
+ * @return int 0 si todo fue correcto, otro valor en caso contrario
+ */
 int assoofs_save_inode_info(struct super_block *sb, struct assoofs_inode_info *inode_info)
 {
     struct buffer_head *bh;
@@ -181,7 +206,6 @@ int assoofs_save_inode_info(struct super_block *sb, struct assoofs_inode_info *i
     bh = sb_bread(sb, ASSOOFS_INODESTORE_BLOCK_NUMBER);
 
     // Buscar los datos de inode_info en el almacén con una función auxiliar:
-
     inode_pos = assoofs_search_inode_info(sb, (struct assoofs_inode_info *)bh->b_data, inode_info);
 
     // Actualizar el inodo, marcar el bloque como sucio y sincronizar
@@ -204,6 +228,13 @@ int assoofs_save_inode_info(struct super_block *sb, struct assoofs_inode_info *i
     return 0;
 }
 
+/**
+ * @brief obtiene la información persistente (assoofs_inode_info) del inodo número inode_ino perteneciente al superbloque sb
+ * 
+ * @param sb superbloque al que pertenece el inodo
+ * @param inode_no número de inodo
+ * @return struct assoofs_inode_info* información persistente del inodo número inode_ino del superbloque sb
+ */
 struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64_t inode_no)
 {
     struct assoofs_inode_info *inode_info = NULL;
@@ -246,6 +277,15 @@ const struct file_operations assoofs_file_operations = {
     .write = assoofs_write,
 };
 
+/**
+ * @brief Permite leer de un archivo
+ * 
+ * @param filp fichero a leer
+ * @param buf buffer de usuario donde poner los datos leídos
+ * @param len longitud a leer
+ * @param ppos desplazamiento de comienzo de lectura. Desde dónde empiezo a leer
+ * @return ssize_t bytes leídos
+ */
 ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
     struct assoofs_inode_info *inode_info;
@@ -291,6 +331,15 @@ ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *pp
     return nbytes;
 }
 
+/**
+ * @brief Permite escribir en un archivo
+ * 
+ * @param filp fichero a escribir
+ * @param buf contenido a escribir
+ * @param len longitud a escribir (de buf)
+ * @param ppos desplazamiento respecto al inicio del fichero donde comenzará la escritura. Desde dónde empiezo a escribir
+ * @return ssize_t bytes escritos
+ */
 ssize_t assoofs_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos)
 {
     char *buffer;
@@ -357,6 +406,13 @@ const struct file_operations assoofs_dir_operations = {
     .iterate = assoofs_iterate,
 };
 
+/**
+ * @brief Sirve para mostrar el contenido de un directorio. Para representar dicho contenido se utiliza un struct dir_context
+ * 
+ * @param filp 
+ * @param ctx 
+ * @return int 0 si todo ha ido bien
+ */
 static int assoofs_iterate(struct file *filp, struct dir_context *ctx)
 {
     struct inode *inode;
@@ -430,6 +486,13 @@ static struct inode_operations assoofs_inode_ops = {
     .rename = assoofs_move_file,
 };
 
+/**
+ * @brief Obtiene un puntero al inodo número ino perteneciente al superbloque sb
+ * 
+ * @param sb superbloque al que pertenece el inodo
+ * @param ino número de inodo del que obtener un puntero
+ * @return struct inode* puntero al inodo número ino del superbloque sb
+ */
 static struct inode *assoofs_get_inode(struct super_block *sb, int ino)
 {
     struct assoofs_inode_info *info = assoofs_get_inode_info(sb, ino);
@@ -463,12 +526,13 @@ static struct inode *assoofs_get_inode(struct super_block *sb, int ino)
 }
 
 /**
- * @brief Consulta los archivos de un directorio
+ * @brief busca la entrada (struct dentry) con nombre concreto (child_dentry->d_name.name) en el directorio x (parent_inode).
+ * Se utiliza para recorrer y mantener el árbol de inodos
  *
- * @param parent_inode
- * @param child_dentry
+ * @param parent_inode inodo del directorio padre (directorio donde buscar)
+ * @param child_dentry entrada a buscar
  * @param flags
- * @return struct dentry*
+ * @return struct dentry* en el caso de ASSOOFS, NULL tanto si se encuentra como si no se encuentra
  */
 struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_dentry, unsigned int flags)
 {
@@ -539,7 +603,6 @@ static int assoofs_create_inode(bool isDir, struct user_namespace *mnt_userns, s
     inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
     inode->i_op = &assoofs_inode_ops;
     inode->i_ino = count + 1; // Asignar nuevo número al inodo a partir de count
-    // TODO: comprobar el i_ino para el remove
 
     if (count > ASSOOFS_MAX_FILESYSTEM_OBJECTS_SUPPORTED)
     {
@@ -638,6 +701,15 @@ static int assoofs_create(struct user_namespace *mnt_userns, struct inode *dir, 
     return assoofs_create_inode(false, mnt_userns, dir, dentry, mode);
 }
 
+/**
+ * @brief Crea nuevos inodos para directorios
+ * 
+ * @param mnt_userns 
+ * @param dir directorio padre del nuevo directorio (del nuevo inodo)
+ * @param dentry 
+ * @param mode permisos del nuevo directorio
+ * @return int 0 si todo va bien
+ */
 static int assoofs_mkdir(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode)
 {
     printk(KERN_INFO "New directory request\n");
@@ -651,8 +723,8 @@ static const struct super_operations assoofs_sops = {
     .drop_inode = generic_delete_inode,
 };
 
-/*
- *  Inicialización del superbloque
+/**
+ *  @brief Inicialización del superbloque
  */
 int assoofs_fill_super(struct super_block *sb, void *data, int silent)
 {
@@ -763,6 +835,14 @@ int assoofs_destroy_inode(struct inode *inode)
     return 0; // TODO ask if valid
 }
 
+/**
+ * @brief Elimina un inodo del sistema de gestión de ficheros.
+ * Para ello marca la entrada como libre y reduce en uno el número de hijos del directorio padre
+ * 
+ * @param dir inodo del directorio en el que se encuentra la entrada a borrar
+ * @param dentry entrada a eliminar
+ * @return int 0 si todo va bien
+ */
 static int assoofs_remove(struct inode *dir, struct dentry *dentry)
 {
     struct inode *inode;
@@ -798,8 +878,15 @@ static int assoofs_remove(struct inode *dir, struct dentry *dentry)
     assoofs_save_inode_info(sb, inode_info);
     assoofs_save_inode_info(sb, parent_inode_info);
 
-    // TODO: Actualizamos el inode en la caché?
+    // Marcamos el bloque como libre
     assoofs_set_a_freeblock(sb_info, inode_info->data_block_number);
+
+    /*
+    Para esta práctica no hace falta actualizar la información de la caché, porque nos han dicho
+    que no es necesario realizar las partes básicas sobre las partes básicas. Por ejemplo, no hace
+    falta usar mutex en las partes opcionales.
+    */
+    
 
     // Ahora el superbloque debe contar con un inodo menos
     sb_info->inodes_count--;
@@ -837,6 +924,13 @@ static int assoofs_remove(struct inode *dir, struct dentry *dentry)
     return 0;
 }
 
+/**
+ * @brief Marca el bloque número data_block_number del superbloque sb_info como libre. Usado al hacer remove.
+ * Realiza la operación contraria que assoofs_get_a_freeblock
+ * 
+ * @param sb_info superbloque donde marcar el bloque como libre
+ * @param data_block_number número de bloque a marcar como libre
+ */
 void assoofs_set_a_freeblock(struct assoofs_super_block_info *sb_info, uint64_t data_block_number)
 {
     printk(KERN_INFO "Set a free block request\n");
@@ -844,6 +938,18 @@ void assoofs_set_a_freeblock(struct assoofs_super_block_info *sb_info, uint64_t 
     sb_info->free_blocks |= (1 << data_block_number);
 }
 
+/**
+ * @brief Mueve un fichero de lugar. Para ello copia y elimina dicho fichero.
+ * Nota: en la práctica solo se pide que funcione con ficheros, no con directorios.
+ * 
+ * @param mnt_userns 
+ * @param old_dir inodo del directorio origen
+ * @param old_dentry entrada del directorio origen
+ * @param new_dir inodo del directorio destino
+ * @param new_dentry entrada del directorio destino
+ * @param excl 
+ * @return int 0 si todo ha ido bien.
+ */
 static int assoofs_move_file(struct user_namespace *mnt_userns, struct inode *old_dir, struct dentry *old_dentry, struct inode *new_dir, struct dentry *new_dentry, unsigned int excl)
 {
     struct inode *inode;
@@ -864,10 +970,9 @@ static int assoofs_move_file(struct user_namespace *mnt_userns, struct inode *ol
     if (inode_info->mode == S_IFREG)
     {
         // Es un fichero
-        assoofs_create(mnt_userns, new_dir, new_dentry, S_IFREG, 0);
+        return assoofs_create(mnt_userns, new_dir, new_dentry, S_IFREG, 0);
     } else {
     	// Es un directorio
-        assoofs_mkdir(mnt_userns, new_dir, new_dentry, S_IFDIR);
+        return assoofs_mkdir(mnt_userns, new_dir, new_dentry, S_IFDIR);
     }
-    return 0;
 }
