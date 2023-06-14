@@ -312,7 +312,7 @@ ssize_t assoofs_read(struct file *filp, char __user *buf, size_t len, loff_t *pp
     // Con copy_to_user copio lo leído en el buffer
     buffer += *ppos;                                                  // Incremento el buffer para que lea a partir de donde se quedó
     nbytes = min((size_t)inode_info->file_size - (size_t)*ppos, len); // Se compara len con el tamaño del fichero menos los bytes leídos hasta el momento por si llegamos al final del fichero
-    // TODO ¿Esta línea para controlar el valor que devuelve está bien?
+
     bytesPorLeerError = copy_to_user(buf, buffer, nbytes);
 
     if (bytesPorLeerError != 0)
@@ -743,7 +743,7 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent)
     // 2.- Comprobar los parámetros del superbloque
     if (assoofs_sb->magic != ASSOOFS_MAGIC || assoofs_sb->block_size != ASSOOFS_DEFAULT_BLOCK_SIZE)
     {
-        printk(KERN_ERR "Error with superblock parameters\n"); // TODO: completar esto
+        printk(KERN_ERR "Error with superblock parameters\n");
         return -1;
     }
 
@@ -803,8 +803,6 @@ static int __init assoofs_init(void)
     return ret;
 }
 
-// TODO apartado C operaciones del sueprbloque
-
 static void __exit assoofs_exit(void)
 {
     int ret;
@@ -832,7 +830,7 @@ int assoofs_destroy_inode(struct inode *inode)
     struct assoofs_inode *inode_info = inode->i_private;
     printk(KERN_INFO "Freeing private data of inode %p (%lu)\n", inode_info, inode->i_ino);
     kmem_cache_free(assoofs_inode_cache, inode_info);
-    return 0; // TODO ask if valid
+    return 0;
 }
 
 /**
